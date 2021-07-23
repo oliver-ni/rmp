@@ -4,6 +4,9 @@ from torch import distributions as D
 # Work in progress.
 
 
+EPS = 1e-4
+
+
 class BetaMixtureModel(torch.nn.Module):
     def __init__(self, num_components):
         super().__init__()
@@ -13,9 +16,9 @@ class BetaMixtureModel(torch.nn.Module):
         self.alphas = torch.nn.Parameter(torch.rand(num_components) * 2, requires_grad=False)
         self.betas = torch.nn.Parameter(torch.rand(num_components) * 2, requires_grad=False)
 
-    def log_likelihood(self, x, epsilon=1e-4):
-        x[x > 1 - epsilon] = 1 - epsilon
-        x[x < epsilon] = epsilon
+    def log_likelihood(self, x):
+        x[x > 1 - EPS] = 1 - EPS
+        x[x < EPS] = EPS
         l = [D.Beta(a, b).log_prob(x) * w for w, a, b in zip(self.weights, self.alphas, self.betas)]
         return torch.stack(l)
 
@@ -29,10 +32,10 @@ class BetaMixtureModel(torch.nn.Module):
     def predict(self, x):
         return self.log_posterior(x).argmax(dim=0)
 
-    def fit(self, x, epsilon=1e-4, num_steps=10):
+    def fit(self, x, num_steps=10):
         x = x.clone().detach()
-        x[x > 1 - epsilon] = 1 - epsilon
-        x[x < epsilon] = epsilon
+        x[x > 1 - EPS] = 1 - EPS
+        x[x < EPS] = EPS
 
         for _ in range(num_steps):
             self._em(x)

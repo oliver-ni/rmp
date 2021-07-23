@@ -5,7 +5,7 @@ from torch import nn
 from torch.nn import functional as F
 from torchvision import models
 
-from bmm import BetaMixtureModel
+from bmm import BetaMixtureModel, EPS
 
 
 class _ImageModel(nn.Module):
@@ -61,7 +61,7 @@ class _BaseModel(nn.Module):
         image_out = self.image_model(imgs)
         attr_out = self.attr_model(attrs)
         combined = torch.cat([image_out, attr_out], dim=1)
-        return self.rest(combined)
+        return image_out, attr_out, self.rest(combined)
 
 
 class BaselineModel(pl.LightningModule):
@@ -81,7 +81,8 @@ class BaselineModel(pl.LightningModule):
         self.est_acc__train_clean = torchmetrics.Accuracy()
 
     def forward(self, imgs, attrs):
-        return self.base_model(imgs, attrs)
+        _, _, out = self.base_model(imgs, attrs)
+        return out
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -135,6 +136,8 @@ class BetaModel(BaselineModel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.bmm = BetaMixtureModel(2)
+        self.bmm_min_loss = 0
+        self.bmm_max_loss = 1
 
     def training_step(self, batch, batch_idx):
         res = super().training_step(batch, batch_idx)
@@ -150,8 +153,10 @@ class BetaModel(BaselineModel):
 
     def training_epoch_end(self, outputs):
         losses = torch.cat([x["losses"] for x in outputs])
-        losses -= losses.min()
-        losses /= losses.max()
+        self.bmm_min_loss = losses.min()
+        self.bmm_max_loss = losses.max()
+        losses -= self.bmm_min_loss
+        losses /= self.bmm_max_loss
 
         self.bmm.fit(losses)
 
@@ -161,8 +166,10 @@ class BetaModel(BaselineModel):
 
     def lm_loss(self, losses, outputs, labels):
         losses = losses.clone().detach()
-        losses -= losses.min()
-        losses /= losses.max()
+        losses -= self.bmm_min_loss
+        losses /= self.bmm_max_loss
+        losses[losses > 1] = 1 - EPS
+        losses[losses < 0] = EPS
 
         preds = F.softmax(outputs, dim=1).argmax(dim=1)
 
