@@ -1,9 +1,10 @@
-from dataset import CUBDataModule
-from model import BaselineModel, BetaModel
-import pytorch_lightning as pl
 from argparse import ArgumentParser
 
-from argparse import ArgumentParser
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
+
+from dataset import CUBDataModule
+from model import BaselineModel, BetaModel
 
 MODELS = {"baseline": BaselineModel, "beta": BetaModel}
 
@@ -21,10 +22,14 @@ def main():
     args = parser.parse_args()
     dict_args = vars(args)
 
-    model = BaselineModel()
+    model = MODELS[dict_args["model"]](**dict_args)
     data = CUBDataModule(**dict_args)
+    logger = TensorBoardLogger(
+        "tensorboard",
+        name=f"{dict_args['model']}_{dict_args['noise_level']}",
+    )
 
-    trainer = pl.Trainer.from_argparse_args(args)
+    trainer = pl.Trainer.from_argparse_args(args, logger=logger)
     trainer.fit(model, data)
 
 
