@@ -71,10 +71,14 @@ class BaselineModel(pl.LightningModule):
         self.lr = learning_rate
 
         self.base_model = _BaseModel()
-        self.val_acc = torchmetrics.Accuracy()
-        self.train_acc = torchmetrics.Accuracy()
-        self.train_acc__noisy = torchmetrics.Accuracy()
-        self.train_acc__clean = torchmetrics.Accuracy()
+        self.acc__val = torchmetrics.Accuracy()
+        self.acc__train = torchmetrics.Accuracy()
+        self.acc__train_noisy = torchmetrics.Accuracy()
+        self.acc__train_clean = torchmetrics.Accuracy()
+        self.est_acc__val = torchmetrics.Accuracy()
+        self.est_acc__train = torchmetrics.Accuracy()
+        self.est_acc__train_noisy = torchmetrics.Accuracy()
+        self.est_acc__train_clean = torchmetrics.Accuracy()
 
     def forward(self, imgs, attrs):
         return self.base_model(imgs, attrs)
@@ -83,20 +87,28 @@ class BaselineModel(pl.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
 
     def training_step(self, batch, batch_idx):
+        noisy = batch["noisy"]
         outputs = self(batch["img"], batch["attributes"])
         losses = F.cross_entropy(outputs, batch["noisy_label"], reduction="none")
         loss = losses.mean()
 
-        noisy = batch["noisy"]
-        self.train_acc(outputs, batch["label"])
-        self.train_acc__noisy(outputs[noisy], batch["label"][noisy])
-        self.train_acc__clean(outputs[~noisy], batch["label"][~noisy])
-        self.log("train_acc", self.train_acc, on_step=True, on_epoch=True)
-        self.log("train_acc__noisy", self.train_acc__noisy, on_step=True, on_epoch=True)
-        self.log("train_acc__clean", self.train_acc__clean, on_step=True, on_epoch=True)
-        self.log("loss", loss, on_step=True, on_epoch=True)
-        self.log("loss__noisy", losses[noisy].mean(), on_step=True, on_epoch=True)
-        self.log("loss__clean", losses[~noisy].mean(), on_step=True, on_epoch=True)
+        self.est_acc__train(outputs, batch["noisy_label"])
+        self.est_acc__train_noisy(outputs[noisy], batch["noisy_label"][noisy])
+        self.est_acc__train_clean(outputs[~noisy], batch["noisy_label"][~noisy])
+        self.log("est_acc/train", self.est_acc__train, on_step=False, on_epoch=True)
+        self.log("est_acc/train_noisy", self.est_acc__train_noisy, on_step=False, on_epoch=True)
+        self.log("est_acc/train_clean", self.est_acc__train_clean, on_step=False, on_epoch=True)
+
+        self.acc__train(outputs, batch["label"])
+        self.acc__train_noisy(outputs[noisy], batch["label"][noisy])
+        self.acc__train_clean(outputs[~noisy], batch["label"][~noisy])
+        self.log("acc/train", self.acc__train, on_step=False, on_epoch=True)
+        self.log("acc/train_noisy", self.acc__train_noisy, on_step=False, on_epoch=True)
+        self.log("acc/train_clean", self.acc__train_clean, on_step=False, on_epoch=True)
+
+        self.log("loss/train", loss, on_step=False, on_epoch=True)
+        self.log("loss/train_noisy", losses[noisy].mean(), on_step=False, on_epoch=True)
+        self.log("loss/train_clean", losses[~noisy].mean(), on_step=False, on_epoch=True)
 
         return {"losses": losses, "loss": loss, "outputs": outputs}
 
@@ -104,8 +116,12 @@ class BaselineModel(pl.LightningModule):
         outputs = self(batch["img"], batch["attributes"])
         val_loss = F.cross_entropy(outputs, batch["label"])
 
-        self.val_acc(outputs, batch["label"])
-        self.log("val_acc", self.val_acc, on_step=True, on_epoch=True)
+        self.acc__val(outputs, batch["label"])
+        self.est_acc__val(outputs, batch["noisy_label"])
+        self.log("acc/val", self.acc__val, on_step=False, on_epoch=True)
+        self.log("est_acc/val", self.est_acc__val, on_step=False, on_epoch=True)
+
+        self.log("loss/val", val_loss, on_step=False, on_epoch=True)
 
         return val_loss
 
@@ -126,14 +142,18 @@ class BetaModel(BaselineModel):
         lm_loss = lm_losses.mean()
 
         noisy = batch["noisy"]
-        self.log("lm_loss", lm_loss, on_step=True, on_epoch=True)
-        self.log("lm_loss__noisy", lm_losses[noisy].mean(), on_step=True, on_epoch=True)
-        self.log("lm_loss__clean", lm_losses[~noisy].mean(), on_step=True, on_epoch=True)
+        self.log("lm_loss/train", lm_loss, on_step=False, on_epoch=True)
+        self.log("lm_loss/train_noisy", lm_losses[noisy].mean(), on_step=False, on_epoch=True)
+        self.log("lm_loss/train_clean", lm_losses[~noisy].mean(), on_step=False, on_epoch=True)
 
-        if self.current_epoch < 5:
-            return res["loss"]
-        else:
-            return lm_loss
+        return res if self.current_epoch < 5 else {**res, "loss": lm_loss}
+
+    def training_epoch_end(self, outputs):
+        losses = torch.cat([x["losses"] for x in outputs])
+        losses -= losses.min()
+        losses /= losses.max()
+
+        self.bmm.fit(losses)
 
     def cross_entropy_onehot(self, inputs, target):
         sum_term = target * F.log_softmax(inputs, dim=1)

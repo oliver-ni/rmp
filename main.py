@@ -27,6 +27,7 @@ def main():
     logger = TensorBoardLogger(
         "tensorboard",
         name=f"{dict_args['model']}_{dict_args['noise_level']}",
+        default_hp_metric=False,
     )
 
     trainer = pl.Trainer.from_argparse_args(args, logger=logger)
