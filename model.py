@@ -1,11 +1,17 @@
+import pandas as pd
 import pytorch_lightning as pl
+import seaborn as sns
 import torch
 import torchmetrics
+from matplotlib import pyplot as plt
+from pytorch_lightning.loggers import TensorBoardLogger
 from torch import nn
 from torch.nn import functional as F
 from torchvision import models
 
-from bmm import BetaMixtureModel, EPS
+from bmm import EPS, BetaMixtureModel
+
+sns.set_theme()
 
 
 class _ImageModel(nn.Module):
@@ -111,7 +117,7 @@ class BaselineModel(pl.LightningModule):
         self.log("loss/train_noisy", losses[noisy].mean(), on_step=False, on_epoch=True)
         self.log("loss/train_clean", losses[~noisy].mean(), on_step=False, on_epoch=True)
 
-        return {"losses": losses, "loss": loss, "outputs": outputs}
+        return {"losses": losses, "loss": loss, "outputs": outputs, "noisy": noisy}
 
     def validation_step(self, batch, batch_idx):
         outputs = self(batch["img"], batch["attributes"])
@@ -152,6 +158,7 @@ class BetaModel(BaselineModel):
         return res if self.current_epoch < 5 else {**res, "loss": lm_loss}
 
     def training_epoch_end(self, outputs):
+        noisy = torch.cat([x["noisy"] for x in outputs])
         losses = torch.cat([x["losses"] for x in outputs])
         self.bmm_min_loss = losses.min()
         self.bmm_max_loss = losses.max()
@@ -159,6 +166,35 @@ class BetaModel(BaselineModel):
         losses /= self.bmm_max_loss
 
         self.bmm.fit(losses)
+
+        if isinstance(self.logger, TensorBoardLogger):
+            fig = self.make_loss_histogram(losses, noisy)
+            self.logger.experiment.add_figure("loss_distribution", fig)
+
+    def make_loss_histogram(self, losses, noisy):
+        fig = plt.figure()
+        plt.title(f"Epoch {self.current_epoch}")
+
+        # Plot histogram
+        df = pd.DataFrame(
+            {"Value": a.item(), "Predicted": b.item(), "Noisy": n.item()}
+            for a, b, n in zip(losses, self.bmm.predict(losses), noisy)
+        )
+        sns.histplot(df, x="Value", hue="Noisy", multiple="stack", binwidth=0.02)
+
+        # Predict
+        lx = torch.arange(0, 1, 0.01, device=self.device)
+        ly = self.bmm.log_likelihood(lx).exp() * noisy.numel() * 0.02
+        noisy_cls = (self.bmm.alphas + self.bmm.betas).argmax().item()
+        lx, ly = lx.cpu(), ly.cpu()
+
+        # Plot lines
+        sns.lineplot(x=lx, y=ly[1 - noisy_cls])
+        sns.lineplot(x=lx, y=ly[noisy_cls])
+        sns.lineplot(x=lx, y=ly.sum(dim=0))
+
+        plt.gca().invert_yaxis()
+        return fig
 
     def cross_entropy_onehot(self, inputs, target):
         sum_term = target * F.log_softmax(inputs, dim=1)
