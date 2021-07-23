@@ -38,11 +38,11 @@ class _AttributesModel(nn.Module):
             nn.Linear(312, 250),
             nn.BatchNorm1d(250),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(250, out_features),
             nn.BatchNorm1d(out_features),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
         )
 
     def forward(self, attrs):
@@ -59,7 +59,7 @@ class _BaseModel(nn.Module):
             nn.Linear(self.image_model.out_features + attr_out_features, 500),
             nn.BatchNorm1d(500),
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(500, 200),
         )
 
@@ -71,10 +71,11 @@ class _BaseModel(nn.Module):
 
 
 class BaselineModel(pl.LightningModule):
-    def __init__(self, learning_rate=0.001, **kwargs):
+    def __init__(self, *, learning_rate, weight_decay, **_):
         super().__init__()
 
         self.lr = learning_rate
+        self.weight_decay = weight_decay
 
         self.base_model = _BaseModel()
         self.acc__val = torchmetrics.Accuracy()
@@ -91,7 +92,7 @@ class BaselineModel(pl.LightningModule):
         return out
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        return torch.optim.AdamW(self.parameters(), lr=self.lr, weight_decay=self.weight_decay)
 
     def training_step(self, batch, batch_idx):
         noisy = batch["noisy"]
@@ -169,7 +170,9 @@ class BetaModel(BaselineModel):
 
         if isinstance(self.logger, TensorBoardLogger):
             fig = self.make_loss_histogram(losses, noisy)
-            self.logger.experiment.add_figure("loss_distribution", fig)
+            self.logger.experiment.add_figure(
+                f"loss_distribution", fig, global_step=self.global_step
+            )
 
     def make_loss_histogram(self, losses, noisy):
         fig = plt.figure()
@@ -180,20 +183,21 @@ class BetaModel(BaselineModel):
             {"Value": a.item(), "Predicted": b.item(), "Noisy": n.item()}
             for a, b, n in zip(losses, self.bmm.predict(losses), noisy)
         )
+        plt.autoscale(True)
         sns.histplot(df, x="Value", hue="Noisy", multiple="stack", binwidth=0.02)
 
         # Predict
         lx = torch.arange(0, 1, 0.01, device=self.device)
-        ly = self.bmm.log_likelihood(lx).exp() * noisy.numel() * 0.02
+        ly = self.bmm.likelihood(lx) * noisy.numel() * 0.02
         noisy_cls = (self.bmm.alphas + self.bmm.betas).argmax().item()
         lx, ly = lx.cpu(), ly.cpu()
 
         # Plot lines
-        sns.lineplot(x=lx, y=ly[1 - noisy_cls])
-        sns.lineplot(x=lx, y=ly[noisy_cls])
-        sns.lineplot(x=lx, y=ly.sum(dim=0))
+        plt.autoscale(False)
+        sns.lineplot(x=lx, y=ly[1 - noisy_cls].tolist())
+        sns.lineplot(x=lx, y=ly[noisy_cls].tolist())
+        sns.lineplot(x=lx, y=ly.sum(dim=0).tolist())
 
-        plt.gca().invert_yaxis()
         return fig
 
     def cross_entropy_onehot(self, inputs, target):

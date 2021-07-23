@@ -16,7 +16,9 @@ def main():
     parser.add_argument("--num_workers", type=float, default=8)
 
     parser.add_argument("--model", default="baseline")
-    parser.add_argument("--learning_rate", type=float, default=0.001)
+    parser.add_argument("--learning_rate", type=float, default=1e-2)
+    parser.add_argument("--weight_decay", type=float, default=1e-2)
+
     parser = pl.Trainer.add_argparse_args(parser)
 
     args = parser.parse_args()
