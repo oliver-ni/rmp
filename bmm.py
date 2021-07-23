@@ -13,26 +13,28 @@ class BetaMixtureModel(torch.nn.Module):
         self.alphas = torch.nn.Parameter(torch.rand(num_components) * 2, requires_grad=False)
         self.betas = torch.nn.Parameter(torch.rand(num_components) * 2, requires_grad=False)
 
-    def likelihood(self, x):
-        l = [
-            D.Beta(a, b).log_prob(x).exp() * w
-            for w, a, b in zip(self.weights, self.alphas, self.betas)
-        ]
+    def log_likelihood(self, x, epsilon=1e-4):
+        x[x > 1 - epsilon] = 1 - epsilon
+        x[x < epsilon] = epsilon
+        l = [D.Beta(a, b).log_prob(x) * w for w, a, b in zip(self.weights, self.alphas, self.betas)]
         return torch.stack(l)
 
+    def log_posterior(self, x):
+        ll = self.log_likelihood(x)
+        return ll - ll.logsumexp(dim=0)
+
     def posterior(self, x):
-        ll = self.likelihood(x)
-        return ll / ll.sum(dim=0)
+        return self.log_posterior(x).exp()
 
     def predict(self, x):
-        return self.posterior(x).argmax(dim=0)
+        return self.log_posterior(x).argmax(dim=0)
 
     def fit(self, x, epsilon=1e-4, num_steps=10):
         x = x.clone().detach()
         x[x > 1 - epsilon] = 1 - epsilon
         x[x < epsilon] = epsilon
 
-        for i in range(num_steps):
+        for _ in range(num_steps):
             self._em(x)
 
         return self
