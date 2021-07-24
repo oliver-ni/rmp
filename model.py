@@ -140,8 +140,11 @@ class BaselineModel(pl.LightningModule):
 
 
 class BetaModel(BaselineModel):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, warmup_epochs, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.warmup_epochs = warmup_epochs
+
         self.bmm = BetaMixtureModel(2)
         self.bmm_min_loss = 0
         self.bmm_max_loss = 1
@@ -156,7 +159,7 @@ class BetaModel(BaselineModel):
         self.log("lm_loss/train_noisy", lm_losses[noisy].mean(), on_step=False, on_epoch=True)
         self.log("lm_loss/train_clean", lm_losses[~noisy].mean(), on_step=False, on_epoch=True)
 
-        return res if self.current_epoch < 5 else {**res, "loss": lm_loss}
+        return res if self.current_epoch < self.warmup_epochs else {**res, "loss": lm_loss}
 
     def training_epoch_end(self, outputs):
         noisy = torch.cat([x["noisy"] for x in outputs])
