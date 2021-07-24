@@ -18,7 +18,7 @@ def main():
     parser.add_argument("--model", default="baseline")
     parser.add_argument("--learning_rate", type=float, default=1e-2)
     parser.add_argument("--weight_decay", type=float, default=1e-2)
-    parser.add_argument("--warmup_epochs", type=float, default=10)
+    parser.add_argument("--warmup_epochs", type=float, default=20)
 
     parser = pl.Trainer.add_argparse_args(parser)
 
