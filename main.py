@@ -13,7 +13,7 @@ def main():
     parser = ArgumentParser()
     parser.add_argument("--dataset_path", default="CUB_200_2011")
     parser.add_argument("--noise_level", type=float, default=0)
-    parser.add_argument("--num_workers", type=float, default=8)
+    parser.add_argument("--num_workers", type=float, default=16)
 
     parser.add_argument("--model", default="baseline")
     parser.add_argument("--learning_rate", type=float, default=1e-2)
