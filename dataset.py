@@ -1,16 +1,12 @@
-import os
-from torch.utils.data.dataloader import DataLoader
 import random
-import tarfile
-import urllib.request
 from itertools import groupby
 from operator import itemgetter
 from pathlib import Path
 
-import gdown
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data.dataloader import DataLoader
 from torchvision import transforms
 from torchvision.io import ImageReadMode, read_image
 
